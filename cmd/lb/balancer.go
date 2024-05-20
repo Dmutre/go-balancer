@@ -103,9 +103,16 @@ func main() {
 		}()
 	}
 
+	healthyServers := make([]string, 0)
+	for _, server := range serversPool {
+		if health(server) {
+			healthyServers = append(healthyServers, server);
+		}
+	}
+
 	frontend := httptools.CreateServer(*port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		serverIndex := int(hash(r.URL.Path)) % len(serversPool)
-		forward(serversPool[serverIndex], rw, r)
+		serverIndex := int(hash(r.URL.Path)) % len(healthyServers)
+		forward(healthyServers[serverIndex], rw, r)
 	}))
 
 	log.Println("Starting load balancer...")
