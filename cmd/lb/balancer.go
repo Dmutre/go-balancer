@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/roman-mazur/architecture-practice-4-template/httptools"
-	"github.com/roman-mazur/architecture-practice-4-template/signal"
+	"github.com/Dmutre/go-balancer/httptools"
+	"github.com/Dmutre/go-balancer/signal"
 )
 
 var (
