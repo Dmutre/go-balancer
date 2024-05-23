@@ -8,7 +8,6 @@ RUN go test ./...
 ENV CGO_ENABLED=0
 RUN go install ./cmd/...
 
-# ==== Final image ====
 FROM alpine:latest
 WORKDIR /opt/practice-4
 
