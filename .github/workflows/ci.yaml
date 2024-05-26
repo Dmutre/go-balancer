@@ -28,6 +28,9 @@ jobs:
           file: ./Dockerfile
           push: false
 
+      - name: Build Docker image
+        run: docker build -t your-image-name .
+
       - name: Run integration tests
         run: |
           docker-compose -f docker-compose.yaml -f docker-compose.test.yaml up --exit-code-from test
