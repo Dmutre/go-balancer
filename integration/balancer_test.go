@@ -115,7 +115,6 @@ func BenchmarkLoadBalancer(b *testing.B) {
 				start := time.Now()
 				resp, fetchErr := client.Do(r)
 				if fetchErr != nil {
-					b.Logf("Failed to get response: %s", fetchErr)
 					return
 				}
 				resp.Body.Close()
@@ -154,7 +153,6 @@ func BenchmarkLoadBalancer(b *testing.B) {
 			count++
 		}
 
-		result += sum / time.Duration(count)
 	}
 
 	b.Logf("Average request duration: %v", time.Duration(result/time.Duration(total)))
