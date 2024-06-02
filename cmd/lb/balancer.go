@@ -18,6 +18,7 @@ var (
 	port = flag.Int("port", 8090, "load balancer port")
 	timeoutSec = flag.Int("timeout-sec", 3, "request timeout time in seconds")
 	https = flag.Bool("https", false, "whether backends support HTTPs")
+	healthInterval = flag.Float64("health-interval", 10, "time between health checks in seconds")
 
 	traceEnabled = flag.Bool("trace", false, "whether to include tracing information into responses")
 )

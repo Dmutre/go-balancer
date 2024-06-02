@@ -19,7 +19,7 @@ services:
       - server3
 
   balancer:
-    command: ["lb", "--trace=true", "--health-interval=1"]
+    command: ["lb", "--trace=true"]
 
   server1:
     command: ["server", "--delay=10", "--health=false", "--debug"]
