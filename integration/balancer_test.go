@@ -1,9 +1,12 @@
 package integration
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -11,160 +14,115 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoadBalancerIntegration(t *testing.T) {
-	if _, exists := os.LookupEnv("ENABLE_INTEGRATION_TEST"); !exists {
+const baseAddress = "http://balancer:8090"
+
+var client = http.Client{
+	Timeout: 3 * time.Second,
+}
+
+const team = "codebryksy"
+
+func getData(key string) (*http.Response, error) {
+	path := fmt.Sprintf("%s/api/v1/some-data", baseAddress)
+
+	queryParams := url.Values{}
+	queryParams.Set("key", key)
+	path += "?" + queryParams.Encode()
+
+	return client.Get(path)
+}
+func TestBalancer(t *testing.T) {
+	if _, exists := os.LookupEnv("INTEGRATION_TEST"); !exists {
 		t.Skip("Integration test is not enabled")
 	}
 
-	client := http.Client{
-		Timeout: 3 * time.Second,
-	}
-	baseAddress := "http://loadbalancer:8090"
-	servers := []string{
-		"server1:8080",
-		"server2:8080",
-		"server3:8080",
-	}
-
-	testIPs := []string{
-		"192.168.1.1",
-		"192.168.1.2",
-		"192.168.1.3:8080",
-		"192.168.1.4",
-		"192.168.1.5:2121",
-	}
-
-	expectedBindings := map[string][]string{
-		"server1:8080": {"192.168.1.2", "192.168.1.4", "192.168.1.5:2121"},
-		"server2:8080": {"192.168.1.3:8080"},
-		"server3:8080": {"192.168.1.1"},
-	}
-
-	getExpectedBinding := func(ip string) string {
-		for _, server := range servers {
-			if contains(expectedBindings[server], ip) {
-				return server
-			}
+	for i := 0; i < 5; i++ {
+		resp, err := getData(team)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Error(err)
 		}
-		panic(fmt.Sprintf("cannot find binding for %s", ip))
+		assert.Equal(t, "server2:8080", resp.Header.Get("lb-from"))
 	}
+
+	resp, err := client.Post("http://server1:8080/inverse-health", "", bytes.NewBuffer([]byte{}))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Error(err)
+	}
+
+	time.Sleep(time.Duration(2) * time.Second)
+
+	resp, err = getData(team)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Error(err)
+	}
+	assert.Equal(t, "server1:8080", resp.Header.Get("lb-from"))
 
 	var wg sync.WaitGroup
-	wg.Add(len(testIPs))
+	wg.Add(6)
 
-	for _, ip := range testIPs {
-		go func(ip string) {
+	cover := [3]bool{false, false, false}
+
+	for i := 0; i < 6; i++ {
+		go func() {
 			defer wg.Done()
-
-			req, _ := http.NewRequest("GET", baseAddress, nil)
-			req.Header.Set("X-Forwarded-For", ip)
-
-			resp, fetchErr := client.Do(req)
-			assert.Nil(t, fetchErr, "Error fetching response")
-			defer resp.Body.Close()
-
-			lbFrom := resp.Header.Get("lb-from")
-			binding, found := expectedBindings[lbFrom]
-			assert.True(t, found, "Unexpected lb-from header value: %s", lbFrom)
-
-			isValid := contains(binding, ip)
-			assert.True(t, isValid, "Expected %s to be in %v, got %v", ip, getExpectedBinding(ip), lbFrom)
-		}(ip)
+			resp, err := getData(team)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				t.Error(err)
+			}
+			idx := resp.Header.Get("lb-from")[6:7]
+			serverIdx, err := strconv.Atoi(idx)
+			if err == nil {
+				cover[serverIdx-1] = true
+			}
+		}()
 	}
 
 	wg.Wait()
+	assert.Equal(t, [3]bool{true, true, true}, cover)
+
+	resp, err = getData("bryksycode")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	resp, err = client.Post("http://server1:8080/inverse-health", "", bytes.NewBuffer([]byte{}))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Error(err)
+	}
+	resp, err = client.Post("http://server2:8080/inverse-health", "", bytes.NewBuffer([]byte{}))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Error(err)
+	}
+	resp, err = client.Post("http://server3:8080/inverse-health", "", bytes.NewBuffer([]byte{}))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Error(err)
+	}
+
+	time.Sleep(time.Duration(2) * time.Second)
+
+	resp, err = getData(team)
+	assert.NotEqual(t, http.StatusOK, resp.StatusCode)
+
+	for i := 0; i < 3; i++ {
+		resp, err = client.Post(fmt.Sprintf("http://server%d:8080/inverse-health", i+1), "", bytes.NewBuffer([]byte{}))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Error(err)
+		}
+	}
+	time.Sleep(time.Duration(2) * time.Second)
 }
 
-func BenchmarkLoadBalancer(b *testing.B) {
-	client := http.Client{
-		Timeout: 3 * time.Second,
-	}
-	baseAddress := "http://loadbalancer:8090"
-
-	parallel := 1000
-	interval := time.Second
-	total := 10
-
-	testIPs := []string{
-		"192.168.1.1",
-		"192.168.1.2",
-		"192.168.1.3",
-	}
-
+func BenchmarkBalancer(b *testing.B) {
 	var wg sync.WaitGroup
-	wg.Add(parallel)
+	wg.Add(b.N)
 
-	start := make(chan struct{})
-
-	benchmarks := make([][]time.Duration, parallel)
-
-	for i := 0; i < parallel; i++ {
-		req, _ := http.NewRequest("GET", baseAddress, nil)
-		req.Header.Set("X-Forwarded-For", testIPs[i%len(testIPs)])
-
-		go func(r *http.Request) {
+	for i := 0; i < b.N; i++ {
+		go func() {
 			defer wg.Done()
-			var (
-				count     int
-				durations = make([]time.Duration, total)
-			)
-
-			<-start
-
-			for range time.Tick(interval) {
-				start := time.Now()
-				resp, fetchErr := client.Do(r)
-				if fetchErr != nil {
-					b.Logf("Failed to get response: %s", fetchErr)
-					return
-				}
-				resp.Body.Close()
-				durations[count] = time.Since(start)
-				if count++; count == total {
-					break
-				}
+			resp, err := getData(team)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				b.Error(err)
 			}
-
-			benchmarks[i] = durations
-		}(req)
+		}()
 	}
-
-	close(start)
 
 	wg.Wait()
-
-	var result time.Duration
-
-	for i := 0; i < total; i++ {
-		var (
-			sum   time.Duration
-			count int
-		)
-
-		for j := 0; j < parallel; j++ {
-			benchmark := benchmarks[j]
-			if benchmark == nil {
-				continue
-			}
-			res := benchmark[i]
-			if res == 0 {
-				continue
-			}
-			sum += res
-			count++
-		}
-
-		result += sum / time.Duration(count)
-	}
-
-	b.Logf("Average request duration: %v", time.Duration(result/time.Duration(total)))
-}
-
-func contains(slice []string, value string) bool {
-	for _, item := range slice {
-		if item == value {
-			return true
-		}
-	}
-	return false
 }
