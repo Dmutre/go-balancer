@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Dmutre/go-balancer/httptools"
@@ -18,6 +20,8 @@ const confResponseDelaySec = "CONF_RESPONSE_DELAY_SEC"
 const confHealthFailure = "CONF_HEALTH_FAILURE"
 
 func main() {
+	flag.Parse()
+
 	h := new(http.ServeMux)
 
 	h.HandleFunc("/health", func(rw http.ResponseWriter, r *http.Request) {
@@ -31,7 +35,14 @@ func main() {
 		}
 	})
 
-	report := make(Report)
+	teamName := "KanchyEnjoyers"
+	currentDate := time.Now().Format("2006-01-02")
+	dbURL := "http://localhost:8081/db/" + teamName
+
+	_, err := http.Post(dbURL, "application/json", strings.NewReader(fmt.Sprintf(`{"value": "%s"}`, currentDate)))
+	if err != nil {
+		panic(err)
+	}
 
 	h.HandleFunc("/api/v1/some-data", func(rw http.ResponseWriter, r *http.Request) {
 		respDelayString := os.Getenv(confResponseDelaySec)
@@ -39,16 +50,39 @@ func main() {
 			time.Sleep(time.Duration(delaySec) * time.Second)
 		}
 
-		report.Process(r)
+		key := r.URL.Query().Get("key")
+		if key == "" {
+			http.Error(rw, "missing key parameter", http.StatusBadRequest)
+			return
+		}
+
+		resp, err := http.Get("http://localhost:8081/db/" + key)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			http.NotFound(rw, r)
+			return
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			http.Error(rw, "error from db service", http.StatusInternalServerError)
+			return
+		}
+
+		var data map[string]string
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		rw.Header().Set("content-type", "application/json")
 		rw.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(rw).Encode([]string{
-			"1", "2",
-		})
+		json.NewEncoder(rw).Encode(data)
 	})
-
-	h.Handle("/report", report)
 
 	server := httptools.CreateServer(*port, h)
 	server.Start()
