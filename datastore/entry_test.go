@@ -7,73 +7,42 @@ import (
 )
 
 func TestEntry_Encode(t *testing.T) {
-	// Test StringType
-	encoder := NewEntry("tK", StringType, "tV")
-	data := encoder.Encode()
-	decoder := &Entry{}
-	err := decoder.Decode(data)
-	if err != nil {
-		t.Fatal(err)
+	e := entry{"key", ToByte("string"), "value"}
+	e.Decode(e.Encode())
+	if e.key != "key" {
+		t.Error("incorrect key")
 	}
-	if decoder.GetLength() != encoder.GetLength() {
-		t.Error("Incorrect length")
-	}
-	if decoder.key != "tK" {
-		t.Error("Incorrect key")
-	}
-	if decoder.value != "tV" {
-		t.Error("Incorrect value")
-	}
-
-	// Test Int64Type
-	encoder = NewEntry("tK", Int64Type, int64(12345))
-	data = encoder.Encode()
-	decoder = &Entry{}
-	err = decoder.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decoder.GetLength() != encoder.GetLength() {
-		t.Error("Incorrect length")
-	}
-	if decoder.key != "tK" {
-		t.Error("Incorrect key")
-	}
-	if decoder.value != int64(12345) {
-		t.Error("Incorrect value")
+	if e.value != "value" {
+		t.Error("incorrect value")
 	}
 }
 
 func TestReadValue(t *testing.T) {
-	// Test StringType
-	encoder := NewEntry("tK", StringType, "tV")
-	data := encoder.Encode()
-	readData := bytes.NewReader(data)
-	bReadData := bufio.NewReader(readData)
-	valueType, value, err := readValue(bReadData)
+	e := entry{"key", ToByte("string"), "test-value"}
+	data := e.Encode()
+	v, err := readValue(bufio.NewReader(bytes.NewReader(data)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if valueType != StringType {
-		t.Errorf("Wrong value type: [%d]", valueType)
+	if v.value != "test-value" {
+		t.Errorf("Got bad value [%s]", v)
 	}
-	if value != "tV" {
-		t.Errorf("Wrong value: [%s]", value)
+	if v.vType != "string" {
+		t.Errorf("Got bad value type [%s]", v)
 	}
+}
 
-	// Test Int64Type
-	encoder = NewEntry("tK", Int64Type, int64(12345))
-	data = encoder.Encode()
-	readData = bytes.NewReader(data)
-	bReadData = bufio.NewReader(readData)
-	valueType, value, err = readValue(bReadData)
+func TestReadValueInt64(t *testing.T) {
+	e := entry{"key", ToByte("int64"), "-12"}
+	data := e.Encode()
+	v, err := readValue(bufio.NewReader(bytes.NewReader(data)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if valueType != Int64Type {
-		t.Errorf("Wrong value type: [%d]", valueType)
+	if v.value != e.value {
+		t.Errorf("Got bad value [%s]", v)
 	}
-	if value != int64(12345) {
-		t.Errorf("Wrong value: [%d]", value)
+	if v.vType != "int64" {
+		t.Errorf("Got bad value type [%s]", v)
 	}
 }
